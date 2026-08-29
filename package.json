@@ -1,0 +1,18 @@
+{
+  "name": "spec-quest",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "build": "pnpm --filter spec-quest-mcp build",
+    "dev": "pnpm --filter spec-quest-mcp dev",
+    "lint": "pnpm -r lint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "eslint": "^10.8.0",
+    "eslint-plugin-unicorn": "^65.0.1",
+    "prettier": "^3.9.4",
+    "typescript-eslint": "^8.62.1"
+  }
+}

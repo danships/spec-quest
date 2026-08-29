@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b0e1a" />
+    <title>Spec Quest</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="quest-header">
+      <div class="quest-title-row">
+        <span class="rune">◆</span>
+        <h1 id="quest-title">Spec Quest</h1>
+        <button id="notify-btn" class="ghost-btn" title="Enable notifications">🔔</button>
+      </div>
+      <div class="score-row">
+        <span class="score-label">score</span>
+        <span id="score" class="score-value">0</span>
+        <span id="run-stats" class="run-stats"></span>
+      </div>
+      <div class="xp-track" title="Time bonus remaining">
+        <div id="xp-fill" class="xp-fill"></div>
+      </div>
+    </header>
+
+    <main id="stage">
+      <section id="empty-state" class="panel center">
+        <p class="big-rune">⚔</p>
+        <p>No quest is running.</p>
+        <p class="muted">Start a session from your agent and the first level appears here.</p>
+      </section>
+    </main>
+
+    <footer id="action-bar" class="action-bar hidden">
+      <input id="steer-input" type="text" placeholder="Steer the quest master…" autocomplete="off" />
+      <button id="steer-btn" class="btn secondary">Steer</button>
+      <button id="reset-btn" class="btn danger" title="Reset this level">↺</button>
+    </footer>
+
+    <script src="renderers.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
