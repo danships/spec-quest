@@ -1,13 +1,13 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { PROTOCOL_VERSION, LEVEL_TYPES, type LevelType } from './protocol.js';
-import * as state from './state.js';
+import type { SpecQuestState } from './state.js';
 
 const text = (value: unknown) => ({
   content: [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }],
 });
 
-export function buildMcpServer(): McpServer {
+export function buildMcpServer(state: SpecQuestState): McpServer {
   const server = new McpServer({ name: 'spec-quest', version: '0.1.0' });
 
   server.registerTool(

@@ -4,10 +4,24 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-process.env.SPECQUEST_DIR = mkdtempSync(path.join(tmpdir(), 'specquest-state-'));
-const state = await import('../dist/state.js');
+const { SpecQuestState } = await import('../dist/state.js');
 const { generateGrid } = await import('../dist/wordsearch.js');
 const { validatePayload } = await import('../dist/protocol.js');
+const state = new SpecQuestState({ stateDir: null });
+
+test('state stores are isolated and persisted stores can be restored', () => {
+  const first = new SpecQuestState({ stateDir: null });
+  const second = new SpecQuestState({ stateDir: null });
+  first.startSession({ title: 'First isolated session' });
+  assert.equal(second.getSession(), null);
+
+  const stateDir = mkdtempSync(path.join(tmpdir(), 'specquest-state-'));
+  const persisted = new SpecQuestState({ stateDir });
+  persisted.startSession({ title: 'Persisted session' });
+  const restored = new SpecQuestState({ stateDir });
+  restored.restore();
+  assert.equal(restored.getSession().title, 'Persisted session');
+});
 
 test('word-search options are playable and every normalized word is in the grid', () => {
   assert.equal(validatePayload('word_search', { options: ['offline', 'server-win', 'manual'] }), null);

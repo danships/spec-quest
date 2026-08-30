@@ -1,46 +1,14 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
-import net from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
-const packageRoot = path.resolve(import.meta.dirname, '..');
-
-function reservePort() {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      server.close(() => resolve(address.port));
-    });
-  });
-}
-
-function waitUntilReady(child) {
-  return new Promise((resolve, reject) => {
-    let output = '';
-    const timeout = setTimeout(() => reject(new Error(`server startup timed out: ${output}`)), 10_000);
-    child.stdout.on('data', (chunk) => {
-      output += chunk;
-      if (output.includes('Spec Quest ready')) {
-        clearTimeout(timeout);
-        resolve();
-      }
-    });
-    child.stderr.on('data', (chunk) => {
-      output += chunk;
-    });
-    child.once('exit', (code) => {
-      clearTimeout(timeout);
-      reject(new Error(`server exited ${code}: ${output}`));
-    });
-  });
-}
+const { createApp } = await import('../dist/app.js');
+const { SpecQuestState } = await import('../dist/state.js');
 
 function resultJson(result) {
   return JSON.parse(result.content.find((item) => item.type === 'text').text);
@@ -66,19 +34,21 @@ Use the test server port.
 `
   );
 
-  const port = await reservePort();
-  const child = spawn(process.execPath, ['dist/index.js'], {
-    cwd: packageRoot,
-    env: { ...process.env, SPECQUEST_PORT: String(port), SPECQUEST_DIR: stateDir },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  context.after(() => child.kill());
-  await waitUntilReady(child);
+  const state = new SpecQuestState({ stateDir });
+  const server = createApp({ state }).listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
 
-  const baseUrl = `http://127.0.0.1:${port}`;
+  const baseUrl = `http://127.0.0.1:${address.port}`;
   const client = new Client({ name: 'specquest-standalone-test', version: '1.0.0' });
   await client.connect(new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp`)));
-  context.after(() => client.close());
+  context.after(async () => {
+    await client.close();
+    await new Promise((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  });
   const call = async (name, args = {}) => resultJson(await client.callTool({ name, arguments: args }));
 
   const info = await call('specquest_info');

@@ -7,7 +7,7 @@ the feature **Offline action queue**. The test performs the protocol handshake,
 starts a session, answers and steers normal levels, resolves a boss review, writes a
 finished spec, and completes the session through the MCP and browser HTTP APIs.
 
-The current regression suite passes five tests. Build, lint, formatting, and the
+The current regression suite passes six tests. Build, lint, formatting, and the
 local package artifact also pass their checks.
 
 ## Recommended improvements
@@ -43,12 +43,17 @@ with:
 
 Loopback should remain the default.
 
-### 3. Improve testability of the server architecture
+### 3. Improve testability of the server architecture — completed
 
-Separate Express application construction from CLI startup and inject the state
-store instead of relying on module-global state. Tests could then bind to an
-ephemeral port with `app.listen(0)`, use isolated in-memory or temporary stores, and
-avoid child-process orchestration and fixed-port races.
+Express application construction is now separate from CLI startup. `createApp`
+receives an isolated `SpecQuestState`, while the CLI only reads environment settings,
+restores state, and binds the listener. A null state directory provides an in-memory
+store; a temporary or production directory provides persistence.
+
+The standalone test now calls `app.listen(0)` in-process and uses the assigned
+ephemeral port. It no longer orchestrates a child process or reserves a fixed port,
+and a dedicated regression verifies that stores are isolated and persisted sessions
+can be restored.
 
 ### 4. Expand protocol validation and limits
 
