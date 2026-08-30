@@ -18,7 +18,18 @@ Prepare the current project. Do all of the following:
    - **Starting the app**: `npx spec-quest-mcp` (env `SPECQUEST_PORT=<port>`), web app
      at `http://localhost:<port>`.
 3. Create the `.specquest/` folder and add `.specquest/` to `.gitignore` if missing.
-4. Register the MCP server for this project. For Claude Code, write `.mcp.json`:
+4. Register the MCP server for the agent host(s) used by the project. Merge existing
+   configuration instead of overwriting it.
+
+   For Codex, add this to project-scoped `.codex/config.toml`:
+
+   ```toml
+   [mcp_servers.spec-quest]
+   url = "http://localhost:<port>/mcp"
+   tool_timeout_sec = 35
+   ```
+
+   For Claude Code, add this to `.mcp.json`:
 
    ```json
    {
@@ -28,7 +39,8 @@ Prepare the current project. Do all of the following:
    }
    ```
 
-   Merge with an existing `.mcp.json` instead of overwriting it.
-
-5. Tell the user: setup is done, start the server with `npx spec-quest-mcp`, open the
-   web app on their phone or a browser tab, then run the start command.
+5. Tell the user: setup is done. Start the server from the project root with
+   `SPECQUEST_PORT=<port> npx spec-quest-mcp`, restart the agent host so it loads the
+   new MCP configuration, open the web app in a browser tab, then run the start command.
+   A phone cannot use the computer's `localhost`; do not suggest phone access until a
+   separately secured LAN mode is available.

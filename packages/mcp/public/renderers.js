@@ -271,6 +271,11 @@
   renderers.boss = (p, submit) => {
     const root = element('div');
     root.append(element('p', 'level-type', '☠ boss fight: the review'));
+    if (p.findings.length === 0) {
+      root.append(element('p', 'boss-finding', 'The review found no unresolved issues.'));
+      root.append(button('Confirm clean review', 'primary block', () => submit({ resolutions: [] })));
+      return root;
+    }
     const hp = element('div', 'boss-hp');
     const hpFill = element('div', 'boss-hp-fill');
     hpFill.style.width = '100%';
@@ -290,9 +295,9 @@
       correction.classList.add('hidden');
       correction.value = '';
       buttons.replaceChildren(
-        button('🛡 Parry (accept)', 'secondary', () => resolve('accept')),
-        button('✋ Block (reject)', 'danger', () => resolve('reject')),
-        button('⚔ Counter', '', () => {
+        button('Apply proposed fix', 'secondary', () => resolve('accept')),
+        button('Keep spec unchanged', 'danger', () => resolve('reject')),
+        button('Provide correction', '', () => {
           correction.classList.remove('hidden');
           buttons.replaceChildren(
             button('Strike (send correction)', 'primary', () => {

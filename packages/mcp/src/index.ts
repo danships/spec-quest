@@ -8,6 +8,7 @@ import * as state from './state.js';
 import { PROTOCOL_VERSION } from './protocol.js';
 
 const PORT = Number(process.env.SPECQUEST_PORT ?? 4477);
+const HOST = process.env.SPECQUEST_HOST ?? '127.0.0.1';
 const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 
 const app = express();
@@ -76,7 +77,7 @@ app.post(
 app.use(express.static(PUBLIC_DIR));
 
 state.restore();
-app.listen(PORT, () => {
-  console.log(`Spec Quest ready on http://localhost:${PORT} (protocol ${PROTOCOL_VERSION})`);
-  console.log(`MCP endpoint: http://localhost:${PORT}/mcp`);
+app.listen(PORT, HOST, () => {
+  console.log(`Spec Quest ready on http://${HOST}:${PORT} (protocol ${PROTOCOL_VERSION})`);
+  console.log(`MCP endpoint: http://${HOST}:${PORT}/mcp`);
 });

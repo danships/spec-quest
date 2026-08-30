@@ -1,7 +1,13 @@
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { PROTOCOL_VERSION, type LevelEnvelope, type LevelType, validatePayload, validateAnswer } from './protocol.js';
+import {
+  PROTOCOL_VERSION,
+  type LevelEnvelope,
+  type LevelType,
+  validatePayload,
+  validateAnswerForPayload,
+} from './protocol.js';
 import { scoreLevel } from './scoring.js';
 import { generateGrid } from './wordsearch.js';
 
@@ -85,6 +91,7 @@ export function startSession(input: { title: string; skillVersion?: string; agen
 
 export function createLevel(type: LevelType, prompt: string, payload: unknown): LevelEnvelope {
   if (!session) throw new Error('no active session, call specquest_start_session first');
+  if (session.finishedAt) throw new Error('session is already finished');
   const error = validatePayload(type, payload);
   if (error) throw new Error(`invalid payload: ${error}`);
   // Any still-open level is superseded: the game shows one level at a time.
@@ -118,10 +125,10 @@ function findLevel(levelId: string): LevelEnvelope {
 }
 
 export function answerLevel(levelId: string, answer: unknown): LevelEnvelope {
+  if (session?.finishedAt) throw new Error('session is already finished');
   const level = findLevel(levelId);
-  if (level.status !== 'pending' && level.status !== 'steered')
-    throw new Error(`level ${levelId} is ${level.status}, not open`);
-  const error = validateAnswer(level.type, answer);
+  if (level.status !== 'pending') throw new Error(`level ${levelId} is ${level.status}, not open`);
+  const error = validateAnswerForPayload(level.type, answer, level.payload);
   if (error) throw new Error(`invalid answer: ${error}`);
   const now = Date.now();
   level.answer = answer;
@@ -135,7 +142,9 @@ export function answerLevel(levelId: string, answer: unknown): LevelEnvelope {
 }
 
 export function steerLevel(levelId: string, text: string): LevelEnvelope {
+  if (session?.finishedAt) throw new Error('session is already finished');
   const level = findLevel(levelId);
+  if (level.status !== 'pending') throw new Error(`level ${levelId} is ${level.status}, not open`);
   level.steerText = text;
   level.steerCount += 1;
   level.status = 'steered';
@@ -145,7 +154,10 @@ export function steerLevel(levelId: string, text: string): LevelEnvelope {
 }
 
 export function resetLevel(levelId: string): LevelEnvelope {
+  if (session?.finishedAt) throw new Error('session is already finished');
   const level = findLevel(levelId);
+  if (level.status !== 'pending' && level.status !== 'steered')
+    throw new Error(`level ${levelId} is ${level.status}, not open`);
   level.resetCount += 1;
   level.steerText = undefined;
   level.status = 'pending';
@@ -157,6 +169,14 @@ export function resetLevel(levelId: string): LevelEnvelope {
 
 export function finishSession(specPath?: string): Session {
   if (!session) throw new Error('no active session');
+  if (session.finishedAt) throw new Error('session is already finished');
+  if (session.levels.some((level) => level.status === 'pending' || level.status === 'steered'))
+    throw new Error('cannot finish while a level is still open');
+  let lastAnswered: LevelEnvelope | undefined;
+  for (const level of session.levels) {
+    if (level.status === 'answered') lastAnswered = level;
+  }
+  if (lastAnswered?.type !== 'boss') throw new Error('cannot finish before a final answered boss review');
   session.finishedAt = Date.now();
   session.specPath = specPath;
   persist();
