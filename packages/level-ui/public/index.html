@@ -24,6 +24,18 @@
       </div>
     </header>
 
+    <aside id="auth-panel" class="auth-panel hidden">
+      <a id="login-link" class="btn primary hidden" href="/auth/github">Sign in with GitHub</a>
+      <span id="auth-user" class="muted hidden"></span>
+      <button id="create-relay-btn" class="ghost-btn hidden">New relay</button>
+      <button id="logout-btn" class="ghost-btn hidden">Sign out</button>
+    </aside>
+    <aside id="relay-setup" class="relay-setup panel hidden">
+      <p class="level-type">relay credentials — shown once</p>
+      <pre id="relay-environment"></pre>
+      <button id="copy-relay-btn" class="btn secondary">Copy configuration</button>
+    </aside>
+
     <main id="stage">
       <section id="empty-state" class="panel center">
         <p class="big-rune">⚔</p>

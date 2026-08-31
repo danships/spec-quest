@@ -8,11 +8,64 @@
   const actionBar = document.querySelector('#action-bar');
   const steerInput = document.querySelector('#steer-input');
   const notifyButton = document.querySelector('#notify-btn');
+  const authPanel = document.querySelector('#auth-panel');
+  const loginLink = document.querySelector('#login-link');
+  const authUser = document.querySelector('#auth-user');
+  const logoutButton = document.querySelector('#logout-btn');
+  const createRelayButton = document.querySelector('#create-relay-btn');
+  const relaySetup = document.querySelector('#relay-setup');
+  const relayEnvironment = document.querySelector('#relay-environment');
+  const copyRelayButton = document.querySelector('#copy-relay-btn');
 
   const BONUS_WINDOW_MS = 120_000;
   let currentLevel = null;
   let renderedKey = null;
   let xpTimer = null;
+
+  /* ---- optional remote-server authentication ---- */
+  async function loadAuth() {
+    try {
+      const response = await fetch('/api/auth/session');
+      if (!response.ok) return;
+      const auth = await response.json();
+      authPanel.classList.remove('hidden');
+      if (auth.authenticated) {
+        authUser.textContent = `@${auth.user.login}`;
+        authUser.classList.remove('hidden');
+        createRelayButton.classList.remove('hidden');
+        logoutButton.classList.remove('hidden');
+      } else {
+        loginLink.classList.remove('hidden');
+      }
+    } catch {
+      // The local MCP server intentionally has no auth endpoint.
+    }
+  }
+
+  logoutButton.addEventListener('click', async () => {
+    await fetch('/auth/logout', { method: 'POST' });
+    globalThis.location.reload();
+  });
+
+  createRelayButton.addEventListener('click', async () => {
+    const response = await fetch('/api/relays', { method: 'POST' });
+    if (!response.ok) {
+      console.error(await response.text());
+      return;
+    }
+    const relay = await response.json();
+    relayEnvironment.textContent = [
+      `SPECQUEST_REMOTE_URL=${globalThis.location.origin}`,
+      `SPECQUEST_RELAY_ID=${relay.relayId}`,
+      `SPECQUEST_RELAY_TOKEN=${relay.relayToken}`,
+    ].join('\n');
+    relaySetup.classList.remove('hidden');
+  });
+
+  copyRelayButton.addEventListener('click', async () => {
+    await globalThis.navigator.clipboard.writeText(relayEnvironment.textContent);
+    copyRelayButton.textContent = 'Copied';
+  });
 
   /* ---- notifications ---- */
   notifyButton.addEventListener('click', async () => {
@@ -157,5 +210,6 @@
       }
     }
   }
+  loadAuth();
   loop();
 })();

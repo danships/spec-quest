@@ -22,11 +22,32 @@ const STATE_DIR = process.env.SPECQUEST_DIR ?? path.join(process.cwd(), '.specqu
 
 let session: Session | null = null;
 const waiters = new Set<() => void>();
+const subscribers = new Set<(snapshot: StateSnapshot) => void>();
+
+export interface StateSnapshot {
+  protocolVersion: string;
+  session: ({ id: string; title: string; totalScore: number; finished: boolean } & ReturnType<typeof stats>) | null;
+  level: LevelEnvelope | null;
+}
+
+export interface RemoteAction {
+  id: string;
+  levelId: string;
+  type: 'answer' | 'steer' | 'reset';
+  payload: Record<string, unknown>;
+}
 
 /** Wakes every pending long-poll (agent waiting for an answer, web app waiting for a level). */
 function notify(): void {
   for (const w of waiters) w();
   waiters.clear();
+  const current = snapshot();
+  for (const subscriber of subscribers) subscriber(current);
+}
+
+export function subscribe(subscriber: (snapshot: StateSnapshot) => void): () => void {
+  subscribers.add(subscriber);
+  return () => subscribers.delete(subscriber);
 }
 
 export function onChange(timeoutMs: number): Promise<void> {
@@ -57,7 +78,10 @@ export function restore(): void {
   try {
     const { id } = JSON.parse(readFileSync(pointer, 'utf8')) as { id: string };
     const file = path.join(STATE_DIR, `session-${id}.json`);
-    if (existsSync(file)) session = JSON.parse(readFileSync(file, 'utf8')) as Session;
+    if (existsSync(file)) {
+      session = JSON.parse(readFileSync(file, 'utf8')) as Session;
+      notify();
+    }
   } catch {
     // PoC shortcut: unreadable state is ignored, a new session starts clean.
   }
@@ -181,4 +205,33 @@ export function stats(): { answered: number; steers: number; resets: number } {
     steers: levels.reduce((n, l) => n + l.steerCount, 0),
     resets: levels.reduce((n, l) => n + l.resetCount, 0),
   };
+}
+
+export function snapshot(): StateSnapshot {
+  return {
+    protocolVersion: PROTOCOL_VERSION,
+    session: session
+      ? {
+          id: session.id,
+          title: session.title,
+          totalScore: session.totalScore,
+          finished: !!session.finishedAt,
+          ...stats(),
+        }
+      : null,
+    level: currentLevel(),
+  };
+}
+
+export function applyRemoteAction(action: RemoteAction): void {
+  if (action.type === 'answer') {
+    answerLevel(action.levelId, action.payload.answer);
+    return;
+  }
+  if (action.type === 'steer') {
+    if (typeof action.payload.text !== 'string' || !action.payload.text) throw new Error('remote steer needs text');
+    steerLevel(action.levelId, action.payload.text);
+    return;
+  }
+  resetLevel(action.levelId);
 }

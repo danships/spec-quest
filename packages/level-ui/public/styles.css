@@ -103,6 +103,28 @@ h1 {
   transition: width 1s linear;
 }
 
+.auth-panel {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  max-width: 560px;
+  margin: 10px auto 0;
+  padding: 0 14px;
+}
+
+.relay-setup {
+  margin-top: 10px;
+}
+.relay-setup pre {
+  color: var(--teal);
+  font-family: var(--display);
+  font-size: 11px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
 /* ---- stage -------------------------------------------------------------- */
 #stage {
   padding: 14px;
