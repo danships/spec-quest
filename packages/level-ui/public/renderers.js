@@ -1,4 +1,4 @@
-/* Renderers for the 12 level types of protocol v1.
+/* Shared renderers for the 12 level types of protocol v1.
  * Each renderer gets (payload, submit) and returns a DOM node.
  * submit(answer) sends the answer object for the level type. */
 

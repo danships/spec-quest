@@ -1,15 +1,13 @@
 #!/usr/bin/env node
 import express from 'express';
-import { fileURLToPath } from 'node:url';
-import path from 'node:path';
+import { publicDirectory } from '@spec-quest/level-ui';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { buildMcpServer } from './mcp.js';
 import * as state from './state.js';
 import { PROTOCOL_VERSION } from './protocol.js';
+import { remoteRelayFromEnvironment } from './remote-relay.js';
 
 const PORT = Number(process.env.SPECQUEST_PORT ?? 4477);
-const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
-
 const app = express();
 app.use(express.json({ limit: '1mb' }));
 
@@ -30,20 +28,7 @@ app.get('/mcp', (_request, response) => response.status(405).end());
 app.get('/api/state', async (request, response) => {
   // Long-poll support: ?wait=1 holds the request until something changes.
   if (request.query.wait) await state.onChange(20_000);
-  const session = state.getSession();
-  response.json({
-    protocolVersion: PROTOCOL_VERSION,
-    session: session
-      ? {
-          id: session.id,
-          title: session.title,
-          totalScore: session.totalScore,
-          finished: !!session.finishedAt,
-          ...state.stats(),
-        }
-      : null,
-    level: state.currentLevel(),
-  });
+  response.json(state.snapshot());
 });
 
 function act(action: (id: string, body: Record<string, unknown>) => unknown) {
@@ -73,9 +58,15 @@ app.post(
 );
 
 // --- Static web app -------------------------------------------------------------
-app.use(express.static(PUBLIC_DIR));
+app.use(express.static(publicDirectory));
 
+const remoteRelay = remoteRelayFromEnvironment();
+if (remoteRelay) state.subscribe((snapshot) => remoteRelay.publish(snapshot));
 state.restore();
+if (remoteRelay) {
+  remoteRelay.publish(state.snapshot());
+  void remoteRelay.poll((action) => state.applyRemoteAction(action));
+}
 app.listen(PORT, () => {
   console.log(`Spec Quest ready on http://localhost:${PORT} (protocol ${PROTOCOL_VERSION})`);
   console.log(`MCP endpoint: http://localhost:${PORT}/mcp`);

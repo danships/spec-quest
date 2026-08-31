@@ -1,0 +1,8 @@
+.git
+.github
+.specquest
+**/dist
+**/node_modules
+node_modules
+npm-debug.log
+pnpm-debug.log

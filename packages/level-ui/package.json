@@ -1,0 +1,21 @@
+{
+  "name": "@spec-quest/level-ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    }
+  },
+  "files": [
+    "index.d.ts",
+    "index.js",
+    "public"
+  ],
+  "scripts": {
+    "build": "node --check index.js",
+    "lint": "eslint ."
+  }
+}
