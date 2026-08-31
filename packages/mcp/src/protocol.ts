@@ -51,17 +51,33 @@ const isString = (v: unknown): v is string => typeof v === 'string' && v.length 
 const isArray = (v: unknown): v is unknown[] => Array.isArray(v) && v.length > 0;
 const isItem = (v: unknown): v is Item =>
   !!v && typeof v === 'object' && isString((v as Item).id) && isString((v as Item).label);
-const allItems = (v: unknown): v is Item[] => isArray(v) && v.every(isItem);
+const allItems = (v: unknown): v is Item[] =>
+  isArray(v) && v.every(isItem) && new Set(v.map((item) => (item as Item).id)).size === v.length;
+const ids = (value: unknown): string[] =>
+  Array.isArray(value) ? value.map((item) => (item as { id: string }).id) : [];
+
+function exactIds(actual: string[], expected: string[], label: string): string | null {
+  if (new Set(actual).size !== actual.length) return `${label} contains duplicate ids`;
+  if (actual.length !== expected.length || actual.some((id) => !expected.includes(id)))
+    return `${label} must contain each level item exactly once`;
+  return null;
+}
 
 type Validator = (payload: Record<string, unknown>) => string | null;
 
 /** Payload validators per level type. Return an error message or null when valid. */
 const payloadValidators: Record<LevelType, Validator> = {
   // options: candidate answer words. The server generates the grid.
-  word_search: (p) =>
-    isArray(p.options) && p.options.every((o) => isString(o) && (o as string).length <= 12)
+  word_search: (p) => {
+    if (!Array.isArray(p.options) || p.options.length < 2 || p.options.length > 8)
+      return 'word_search needs options: 2-8 strings';
+    const words = p.options.map((option) =>
+      typeof option === 'string' ? option.toUpperCase().replaceAll(/[^A-Z]/g, '') : ''
+    );
+    return words.every((word) => word.length > 0 && word.length <= 12) && new Set(words).size === words.length
       ? null
-      : 'word_search needs options: string[] (each 1-12 chars)',
+      : 'word_search options must be distinct and normalize to 1-12 A-Z letters';
+  },
   doors: (p) =>
     allItems(p.options) && (p.options as Item[]).length >= 2 && (p.options as Item[]).length <= 4
       ? null
@@ -92,10 +108,11 @@ const payloadValidators: Record<LevelType, Validator> = {
   riddle: (p) => (isString(p.question) ? null : 'riddle needs question: string'),
   spot_the_bug: (p) => (allItems(p.spans) ? null : 'spot_the_bug needs spans: {id,label}[] (fragments, one flawed)'),
   boss: (p) =>
-    isArray(p.findings) &&
+    Array.isArray(p.findings) &&
     p.findings.every(
       (f) => !!f && typeof f === 'object' && isString((f as Item).id) && isString((f as { text: unknown }).text)
-    )
+    ) &&
+    new Set(p.findings.map((finding) => (finding as Item).id)).size === p.findings.length
       ? null
       : 'boss needs findings: {id,text}[]',
 };
@@ -151,7 +168,7 @@ const answerValidators: Record<LevelType, Validator> = {
   riddle: (a) => (isString(a.text) ? null : 'answer needs text: string'),
   spot_the_bug: (a) => (isString(a.selectedId) ? null : 'answer needs selectedId: string, note?: string'),
   boss: (a) =>
-    isArray(a.resolutions) &&
+    Array.isArray(a.resolutions) &&
     a.resolutions.every(
       (r) =>
         !!r &&
@@ -172,4 +189,84 @@ export function validatePayload(type: LevelType, payload: unknown): string | nul
 export function validateAnswer(type: LevelType, answer: unknown): string | null {
   if (!answer || typeof answer !== 'object') return 'answer must be an object';
   return answerValidators[type](answer as Record<string, unknown>);
+}
+
+/** Validate answer values against the level payload, not only their JSON shape. */
+export function validateAnswerForPayload(type: LevelType, answer: unknown, payload: unknown): string | null {
+  const shapeError = validateAnswer(type, answer);
+  if (shapeError) return shapeError;
+  if (!payload || typeof payload !== 'object') return 'level payload must be an object';
+
+  const a = answer as Record<string, unknown>;
+  const p = payload as Record<string, unknown>;
+  const selectedIds = (a.selectedIds as string[]) ?? [];
+
+  switch (type) {
+    case 'word_search': {
+      return (p.options as string[]).includes(a.selected as string)
+        ? null
+        : 'selected must be one of the level options';
+    }
+    case 'doors': {
+      return ids(p.options).includes(a.chosenId as string) ? null : 'chosenId must reference a level option';
+    }
+    case 'this_or_that': {
+      return exactIds(
+        (a.choices as { id: string }[]).map((choice) => choice.id),
+        ids(p.items),
+        'choices'
+      );
+    }
+    case 'highlight_words':
+    case 'loot_chest': {
+      if (new Set(selectedIds).size !== selectedIds.length) return 'selectedIds contains duplicate ids';
+      return selectedIds.every((id) => ids(p.items).includes(id)) ? null : 'selectedIds must reference level items';
+    }
+    case 'match_pairs': {
+      const pairs = a.pairs as { leftId: string; rightId: string }[];
+      const leftError = exactIds(
+        pairs.map((pair) => pair.leftId),
+        ids(p.left),
+        'pairs.leftId'
+      );
+      if (leftError) return leftError;
+      return pairs.every((pair) => ids(p.right).includes(pair.rightId))
+        ? null
+        : 'pairs.rightId must reference a right-side level item';
+    }
+    case 'sort_order': {
+      return exactIds(a.orderedIds as string[], ids(p.items), 'orderedIds');
+    }
+    case 'bucket_toss': {
+      const placements = a.placements as { itemId: string; bucketId: string }[];
+      const itemError = exactIds(
+        placements.map((placement) => placement.itemId),
+        ids(p.items),
+        'placements.itemId'
+      );
+      if (itemError) return itemError;
+      return placements.every((placement) => ids(p.buckets).includes(placement.bucketId))
+        ? null
+        : 'placements.bucketId must reference a level bucket';
+    }
+    case 'spot_the_bug': {
+      return ids(p.spans).includes(a.selectedId as string) ? null : 'selectedId must reference a level span';
+    }
+    case 'boss': {
+      const resolutions = a.resolutions as { id: string; action: string; correction?: unknown }[];
+      const resolutionError = exactIds(
+        resolutions.map((resolution) => resolution.id),
+        ids(p.findings),
+        'resolutions'
+      );
+      if (resolutionError) return resolutionError;
+      return resolutions.some((resolution) => resolution.action === 'correct' && !isString(resolution.correction))
+        ? 'correct resolutions need non-empty correction text'
+        : null;
+    }
+    case 'fill_the_rune':
+    case 'riddle': {
+      return null;
+    }
+  }
 }

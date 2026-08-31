@@ -1,7 +1,13 @@
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
-import path from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { PROTOCOL_VERSION, type LevelEnvelope, type LevelType, validatePayload, validateAnswer } from './protocol.js';
+import path from 'node:path';
+import {
+  PROTOCOL_VERSION,
+  type LevelEnvelope,
+  type LevelType,
+  validateAnswerForPayload,
+  validatePayload,
+} from './protocol.js';
 import { scoreLevel } from './scoring.js';
 import { generateGrid } from './wordsearch.js';
 
@@ -18,167 +24,196 @@ export interface Session {
   totalScore: number;
 }
 
-const STATE_DIR = process.env.SPECQUEST_DIR ?? path.join(process.cwd(), '.specquest');
-
-let session: Session | null = null;
-const waiters = new Set<() => void>();
-
-/** Wakes every pending long-poll (agent waiting for an answer, web app waiting for a level). */
-function notify(): void {
-  for (const w of waiters) w();
-  waiters.clear();
+export interface SpecQuestStateOptions {
+  /** A null directory creates an in-memory store. Undefined uses .specquest in the current directory. */
+  stateDir?: string | null;
 }
 
-export function onChange(timeoutMs: number): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      waiters.delete(wake);
-      resolve();
-    }, timeoutMs);
-    const wake = () => {
-      clearTimeout(timer);
-      resolve();
+/** An isolated session store that can be injected into the app and MCP server. */
+export class SpecQuestState {
+  readonly #stateDir: string | null;
+  #session: Session | null = null;
+  readonly #waiters = new Set<() => void>();
+
+  constructor(options: SpecQuestStateOptions = {}) {
+    this.#stateDir = options.stateDir === undefined ? path.join(process.cwd(), '.specquest') : options.stateDir;
+  }
+
+  /** Wakes every pending long-poll (agent waiting for an answer, web app waiting for a level). */
+  #notify(): void {
+    for (const waiter of this.#waiters) waiter();
+    this.#waiters.clear();
+  }
+
+  onChange(timeoutMs: number): Promise<void> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.#waiters.delete(wake);
+        resolve();
+      }, timeoutMs);
+      const wake = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      this.#waiters.add(wake);
+    });
+  }
+
+  #persist(): void {
+    if (!this.#session || !this.#stateDir) return;
+    mkdirSync(this.#stateDir, { recursive: true });
+    writeFileSync(
+      path.join(this.#stateDir, `session-${this.#session.id}.json`),
+      JSON.stringify(this.#session, null, 2)
+    );
+    writeFileSync(path.join(this.#stateDir, 'current.json'), JSON.stringify({ id: this.#session.id }));
+  }
+
+  /** Restore the last session on server restart, so a crash does not lose the run. */
+  restore(): void {
+    if (!this.#stateDir) return;
+    const pointer = path.join(this.#stateDir, 'current.json');
+    if (!existsSync(pointer)) return;
+    try {
+      const { id } = JSON.parse(readFileSync(pointer, 'utf8')) as { id: string };
+      const file = path.join(this.#stateDir, `session-${id}.json`);
+      if (existsSync(file)) this.#session = JSON.parse(readFileSync(file, 'utf8')) as Session;
+    } catch {
+      // PoC shortcut: unreadable state is ignored, a new session starts clean.
+    }
+  }
+
+  getSession(): Session | null {
+    return this.#session;
+  }
+
+  startSession(input: { title: string; skillVersion?: string; agentModel?: string }): Session {
+    this.#session = {
+      id: randomUUID().slice(0, 8),
+      title: input.title,
+      protocolVersion: PROTOCOL_VERSION,
+      skillVersion: input.skillVersion,
+      agentModel: input.agentModel,
+      createdAt: Date.now(),
+      levels: [],
+      totalScore: 0,
     };
-    waiters.add(wake);
-  });
-}
-
-function persist(): void {
-  if (!session) return;
-  mkdirSync(STATE_DIR, { recursive: true });
-  writeFileSync(path.join(STATE_DIR, `session-${session.id}.json`), JSON.stringify(session, null, 2));
-  writeFileSync(path.join(STATE_DIR, 'current.json'), JSON.stringify({ id: session.id }));
-}
-
-/** Restore the last session on server restart, so a crash does not lose the run. */
-export function restore(): void {
-  const pointer = path.join(STATE_DIR, 'current.json');
-  if (!existsSync(pointer)) return;
-  try {
-    const { id } = JSON.parse(readFileSync(pointer, 'utf8')) as { id: string };
-    const file = path.join(STATE_DIR, `session-${id}.json`);
-    if (existsSync(file)) session = JSON.parse(readFileSync(file, 'utf8')) as Session;
-  } catch {
-    // PoC shortcut: unreadable state is ignored, a new session starts clean.
+    this.#persist();
+    this.#notify();
+    return this.#session;
   }
-}
 
-export function getSession(): Session | null {
-  return session;
-}
-
-export function startSession(input: { title: string; skillVersion?: string; agentModel?: string }): Session {
-  session = {
-    id: randomUUID().slice(0, 8),
-    title: input.title,
-    protocolVersion: PROTOCOL_VERSION,
-    skillVersion: input.skillVersion,
-    agentModel: input.agentModel,
-    createdAt: Date.now(),
-    levels: [],
-    totalScore: 0,
-  };
-  persist();
-  notify();
-  return session;
-}
-
-export function createLevel(type: LevelType, prompt: string, payload: unknown): LevelEnvelope {
-  if (!session) throw new Error('no active session, call specquest_start_session first');
-  const error = validatePayload(type, payload);
-  if (error) throw new Error(`invalid payload: ${error}`);
-  // Any still-open level is superseded: the game shows one level at a time.
-  for (const level of session.levels) {
-    if (level.status === 'pending' || level.status === 'steered') level.status = 'superseded';
+  createLevel(type: LevelType, prompt: string, payload: unknown): LevelEnvelope {
+    if (!this.#session) throw new Error('no active session, call specquest_start_session first');
+    if (this.#session.finishedAt) throw new Error('session is already finished');
+    const error = validatePayload(type, payload);
+    if (error) throw new Error(`invalid payload: ${error}`);
+    // Any still-open level is superseded: the game shows one level at a time.
+    for (const level of this.#session.levels) {
+      if (level.status === 'pending' || level.status === 'steered') level.status = 'superseded';
+    }
+    let finalPayload = payload as Record<string, unknown>;
+    if (type === 'word_search') {
+      finalPayload = { ...finalPayload, grid: generateGrid(finalPayload.options as string[]) };
+    }
+    const level: LevelEnvelope = {
+      id: randomUUID().slice(0, 8),
+      type,
+      prompt,
+      payload: finalPayload,
+      status: 'pending',
+      createdAt: Date.now(),
+      steerCount: 0,
+      resetCount: 0,
+    };
+    this.#session.levels.push(level);
+    this.#persist();
+    this.#notify();
+    return level;
   }
-  let finalPayload = payload as Record<string, unknown>;
-  if (type === 'word_search') {
-    finalPayload = { ...finalPayload, grid: generateGrid(finalPayload.options as string[]) };
+
+  #findLevel(levelId: string): LevelEnvelope {
+    const level = this.#session?.levels.find((candidate) => candidate.id === levelId);
+    if (!level) throw new Error(`unknown level: ${levelId}`);
+    return level;
   }
-  const level: LevelEnvelope = {
-    id: randomUUID().slice(0, 8),
-    type,
-    prompt,
-    payload: finalPayload,
-    status: 'pending',
-    createdAt: Date.now(),
-    steerCount: 0,
-    resetCount: 0,
-  };
-  session.levels.push(level);
-  persist();
-  notify();
-  return level;
-}
 
-function findLevel(levelId: string): LevelEnvelope {
-  const level = session?.levels.find((l) => l.id === levelId);
-  if (!level) throw new Error(`unknown level: ${levelId}`);
-  return level;
-}
-
-export function answerLevel(levelId: string, answer: unknown): LevelEnvelope {
-  const level = findLevel(levelId);
-  if (level.status !== 'pending' && level.status !== 'steered')
-    throw new Error(`level ${levelId} is ${level.status}, not open`);
-  const error = validateAnswer(level.type, answer);
-  if (error) throw new Error(`invalid answer: ${error}`);
-  const now = Date.now();
-  level.answer = answer;
-  level.answeredAt = now;
-  level.status = 'answered';
-  level.points = scoreLevel(level, now);
-  session!.totalScore += level.points;
-  persist();
-  notify();
-  return level;
-}
-
-export function steerLevel(levelId: string, text: string): LevelEnvelope {
-  const level = findLevel(levelId);
-  level.steerText = text;
-  level.steerCount += 1;
-  level.status = 'steered';
-  persist();
-  notify();
-  return level;
-}
-
-export function resetLevel(levelId: string): LevelEnvelope {
-  const level = findLevel(levelId);
-  level.resetCount += 1;
-  level.steerText = undefined;
-  level.status = 'pending';
-  level.createdAt = Date.now(); // the time bonus window restarts with the level
-  persist();
-  notify();
-  return level;
-}
-
-export function finishSession(specPath?: string): Session {
-  if (!session) throw new Error('no active session');
-  session.finishedAt = Date.now();
-  session.specPath = specPath;
-  persist();
-  notify();
-  return session;
-}
-
-/** The level the web app should render: the newest open one. */
-export function currentLevel(): LevelEnvelope | null {
-  if (!session) return null;
-  for (let index = session.levels.length - 1; index >= 0; index--) {
-    const level = session.levels[index];
-    if (level.status === 'pending' || level.status === 'steered') return level;
+  answerLevel(levelId: string, answer: unknown): LevelEnvelope {
+    if (this.#session?.finishedAt) throw new Error('session is already finished');
+    const level = this.#findLevel(levelId);
+    if (level.status !== 'pending') throw new Error(`level ${levelId} is ${level.status}, not open`);
+    const error = validateAnswerForPayload(level.type, answer, level.payload);
+    if (error) throw new Error(`invalid answer: ${error}`);
+    const now = Date.now();
+    level.answer = answer;
+    level.answeredAt = now;
+    level.status = 'answered';
+    level.points = scoreLevel(level, now);
+    this.#session!.totalScore += level.points;
+    this.#persist();
+    this.#notify();
+    return level;
   }
-  return null;
-}
 
-export function stats(): { answered: number; steers: number; resets: number } {
-  const levels = session?.levels ?? [];
-  return {
-    answered: levels.filter((l) => l.status === 'answered').length,
-    steers: levels.reduce((n, l) => n + l.steerCount, 0),
-    resets: levels.reduce((n, l) => n + l.resetCount, 0),
-  };
+  steerLevel(levelId: string, text: string): LevelEnvelope {
+    if (this.#session?.finishedAt) throw new Error('session is already finished');
+    const level = this.#findLevel(levelId);
+    if (level.status !== 'pending') throw new Error(`level ${levelId} is ${level.status}, not open`);
+    level.steerText = text;
+    level.steerCount += 1;
+    level.status = 'steered';
+    this.#persist();
+    this.#notify();
+    return level;
+  }
+
+  resetLevel(levelId: string): LevelEnvelope {
+    if (this.#session?.finishedAt) throw new Error('session is already finished');
+    const level = this.#findLevel(levelId);
+    if (level.status !== 'pending' && level.status !== 'steered')
+      throw new Error(`level ${levelId} is ${level.status}, not open`);
+    level.resetCount += 1;
+    level.steerText = undefined;
+    level.status = 'pending';
+    level.createdAt = Date.now(); // the time bonus window restarts with the level
+    this.#persist();
+    this.#notify();
+    return level;
+  }
+
+  finishSession(specPath?: string): Session {
+    if (!this.#session) throw new Error('no active session');
+    if (this.#session.finishedAt) throw new Error('session is already finished');
+    if (this.#session.levels.some((level) => level.status === 'pending' || level.status === 'steered'))
+      throw new Error('cannot finish while a level is still open');
+    let lastAnswered: LevelEnvelope | undefined;
+    for (const level of this.#session.levels) {
+      if (level.status === 'answered') lastAnswered = level;
+    }
+    if (lastAnswered?.type !== 'boss') throw new Error('cannot finish before a final answered boss review');
+    this.#session.finishedAt = Date.now();
+    this.#session.specPath = specPath;
+    this.#persist();
+    this.#notify();
+    return this.#session;
+  }
+
+  /** The level the web app should render: the newest open one. */
+  currentLevel(): LevelEnvelope | null {
+    if (!this.#session) return null;
+    for (let index = this.#session.levels.length - 1; index >= 0; index--) {
+      const level = this.#session.levels[index];
+      if (level.status === 'pending' || level.status === 'steered') return level;
+    }
+    return null;
+  }
+
+  stats(): { answered: number; steers: number; resets: number } {
+    const levels = this.#session?.levels ?? [];
+    return {
+      answered: levels.filter((level) => level.status === 'answered').length,
+      steers: levels.reduce((count, level) => count + level.steerCount, 0),
+      resets: levels.reduce((count, level) => count + level.resetCount, 0),
+    };
+  }
 }

@@ -1,13 +1,13 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { PROTOCOL_VERSION, LEVEL_TYPES, type LevelType } from './protocol.js';
-import * as state from './state.js';
+import type { SpecQuestState } from './state.js';
 
 const text = (value: unknown) => ({
   content: [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }],
 });
 
-export function buildMcpServer(): McpServer {
+export function buildMcpServer(state: SpecQuestState): McpServer {
   const server = new McpServer({ name: 'spec-quest', version: '0.1.0' });
 
   server.registerTool(
@@ -33,7 +33,7 @@ export function buildMcpServer(): McpServer {
     {
       description: 'Start a new Spec Quest session. Supersedes any previous session.',
       inputSchema: {
-        title: z.string().describe('Short title of the feature or spec being worked on'),
+        title: z.string().min(1).describe('Short title of the feature or spec being worked on'),
         skillVersion: z.string().optional().describe('Version of the Spec Quest skill in use'),
         agentModel: z.string().optional().describe('Model identifier of the agent, for the run metadata'),
       },
@@ -56,7 +56,7 @@ export function buildMcpServer(): McpServer {
         'spot_the_bug {spans: {id,label}[]}; boss {findings: {id,text}[]}.',
       inputSchema: {
         type: z.enum(LEVEL_TYPES).describe('Level type'),
-        prompt: z.string().describe('The underlying spec question, shown to the player'),
+        prompt: z.string().min(1).describe('The underlying spec question, shown to the player'),
         payload: z.record(z.unknown()).describe('Type-specific payload, see the description'),
       },
     },

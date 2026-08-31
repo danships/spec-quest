@@ -5,13 +5,18 @@
   "scripts": {
     "build": "pnpm --filter spec-quest-mcp build",
     "dev": "pnpm --filter spec-quest-mcp dev",
+    "prepare": "husky",
+    "test": "pnpm --filter spec-quest-mcp test",
     "lint": "pnpm -r lint",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
   "devDependencies": {
+    "@commitlint/cli": "^21.2.2",
+    "@commitlint/config-conventional": "^21.2.2",
     "eslint": "^10.8.0",
     "eslint-plugin-unicorn": "^65.0.1",
+    "husky": "^9.1.7",
     "prettier": "^3.9.4",
     "typescript-eslint": "^8.62.1"
   }
